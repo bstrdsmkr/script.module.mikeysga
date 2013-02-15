@@ -1,42 +1,32 @@
 #INPUT BELOW INTO YOUR SETTINGS.XML
-#<setting id="ga_time" type="text" label="GA Called" default="2000-01-01 00:00:00" visible="false"/>
+#<setting id="ga_time" type="text" label="GA Called" default="0" visible="false"/>
 #<setting id="visitor_ga" type="text" label="GA visitor" default="" visible="false"/>
 
-ADDON = xbmcaddon.Addon(id='plugin.YOUR PLUGIN')
+import time
+import threading
+from functools import wraps
 
+ADDON = xbmcaddon.Addon(id='plugin.YOUR PLUGIN')
 PATH = "PLUGIN NAME"  
 VERSION = "PLUGIN VERSION" 
 UATRACK="UA-xxxxxxxxx-1" #YOUR UA-ANALYTICS NUMBER
 VISITOR = ADDON.getSetting('visitor_ga')
-
-def parseDate(dateString):
-    try:
-        return datetime.datetime.fromtimestamp(time.mktime(time.strptime(dateString.encode('utf-8', 'replace'), "%Y-%m-%d %H:%M:%S")))
-    except:
-        return datetime.datetime.today() - datetime.timedelta(days = 1) #force update
-
 
 def checkGA():
 
     secsInHour = 60 * 60
     threshold  = 2 * secsInHour
 
-    now   = datetime.datetime.today()
-    prev  = parseDate(ADDON.getSetting('ga_time'))
+    now   = time.time()
+    prev  = int(ADDON.getSetting('ga_time'))
     delta = now - prev
-    nDays = delta.days
-    nSecs = delta.seconds
 
-    doUpdate = (nDays > 0) or (nSecs > threshold)
-    if not doUpdate:
+    if not delta > threshold:
         return
 
-    ADDON.setSetting('ga_time', str(now).split('.')[0])
+    ADDON.setSetting('ga_time', now)
     APP_LAUNCH()
-    
-    
-    
-                    
+
 def send_request_to_google_analytics(utm_url):
     ua='Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9.0.3) Gecko/2008092417 Firefox/3.0.3'
     import urllib2
@@ -60,43 +50,35 @@ def GA(group,name):
             from urllib import unquote, quote
             from os import environ
             from hashlib import sha1
-            utm_gif_location = "http://www.google-analytics.com/__utm.gif"
-            if not group=="None":
-                    utm_track = utm_gif_location + "?" + \
-                            "utmwv=" + VERSION + \
-                            "&utmn=" + str(randint(0, 0x7fffffff)) + \
-                            "&utmt=" + "event" + \
+
+            gif_location = "http://www.google-analytics.com/__utm.gif?"
+            UTMWV = "utmwv=%s" %VERSION
+            UTMN = "&utmn=%s" %str(randint(0, 0x7fffffff))
+            UTMCC = "&utmcc=__utma=%s" % ".".join(["1", VISITOR, VISITOR, VISITOR,VISITOR,"2"])
+            if group is not None:
+                    utm_track = gif_location + UTMWV + UTMN + \
+                            "&utmt=event" + \
                             "&utme="+ quote("5(channel*click*"+name+")")+\
                             "&utmp=" + quote(PATH) + \
-                            "&utmac=" + UATRACK + \
-                            "&utmcc=__utma=%s" % ".".join(["1", VISITOR, VISITOR, VISITOR,VISITOR,"2"])
+                            "&utmac=" + UATRACK + UTMCC
                     try:
                         print "============================ POSTING TRACK EVENT ============================"
                         send_request_to_google_analytics(utm_track)
                     except:
                         print "============================  CANNOT POST TRACK EVENT ============================" 
-            if name=="None":
-                    utm_url = utm_gif_location + "?" + \
-                            "utmwv=" + VERSION + \
-                            "&utmn=" + str(randint(0, 0x7fffffff)) + \
+            if name is not None:
+                    utm_url = gif_location + UTMWV + UTMN + \
                             "&utmp=" + quote(PATH) + \
-                            "&utmac=" + UATRACK + \
-                            "&utmcc=__utma=%s" % ".".join(["1", VISITOR, VISITOR, VISITOR, VISITOR,"2"])
+                            "&utmac=" + UATRACK + UTMCC
             else:
-                if group=="None":
-                       utm_url = utm_gif_location + "?" + \
-                                "utmwv=" + VERSION + \
-                                "&utmn=" + str(randint(0, 0x7fffffff)) + \
+                if group is not None:
+                       utm_url = gif_location + UTMWV + UTMN + \
                                 "&utmp=" + quote(PATH+"/"+name) + \
-                                "&utmac=" + UATRACK + \
-                                "&utmcc=__utma=%s" % ".".join(["1", VISITOR, VISITOR, VISITOR, VISITOR,"2"])
+                                "&utmac=" + UATRACK + UTMCC
                 else:
-                       utm_url = utm_gif_location + "?" + \
-                                "utmwv=" + VERSION + \
-                                "&utmn=" + str(randint(0, 0x7fffffff)) + \
+                       utm_url = gif_location + UTMWV + UTMN + \
                                 "&utmp=" + quote(PATH+"/"+group+"/"+name) + \
-                                "&utmac=" + UATRACK + \
-                                "&utmcc=__utma=%s" % ".".join(["1", VISITOR, VISITOR, VISITOR, VISITOR,"2"])
+                                "&utmac=" + UATRACK + UTMCC
                                 
             print "============================ POSTING ANALYTICS ============================"
             send_request_to_google_analytics(utm_url)
@@ -123,8 +105,8 @@ def APP_LAUNCH():
                 PLATFORM=platform.system()+' '+platform.release()
             except: 
                 PLATFORM=platform.system()
-            utm_gif_location = "http://www.google-analytics.com/__utm.gif"
-            utm_track = utm_gif_location + "?" + \
+            gif_location = "http://www.google-analytics.com/__utm.gif"
+            utm_track = gif_location + "?" + \
                     "utmwv=" + VERSION + \
                     "&utmn=" + str(randint(0, 0x7fffffff)) + \
                     "&utmt=" + "event" + \
@@ -141,3 +123,13 @@ def APP_LAUNCH():
         except:
             print "================  CANNOT POST TO ANALYTICS  ================" 
 checkGA()
+
+def track(group, name):
+    def factory(func):
+        @wraps(func)
+        def decorator(*args, **kwargs):
+            t = threading.Thread(target = GA, args=(group, name))
+            t.start()
+            return func(*args, **kwargs)
+        return decorator
+    return factory
